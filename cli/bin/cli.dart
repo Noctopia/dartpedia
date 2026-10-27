@@ -2,26 +2,25 @@
 // import 'dart:io';
 
 // import 'package:http/http.dart' as http;
+
 import 'package:command_runner/command_runner.dart';
 
-const version = '0.0.1';
-
-void main(List<String> arguments) {
-  var commandRunner = CommandRunner()..addCommand(HelpCommand());
-  commandRunner.run(arguments);
+Future<void> main(List<String> arguments) async {
+  var commandRunner = CommandRunner(
+    onOutput: (String output) async {
+      await write(output);
+    },
+    onError: (Object error) {
+      if (error is Error) {
+        throw error;
+      }
+      if (error is Exception) {
+        print(error);
+      }
+    },
+  )..addCommand(HelpCommand());
+  await commandRunner.run(arguments);
 }
-
-// void main() {
-//   final verboseOption = Option(
-//     'verbose',
-//     type: OptionType.flag,
-//     abbr: 'v',
-//     help: 'Display extra logging information.',
-//   );
-
-//   print('Defined option: ${verboseOption.name}');
-//   print('Usage: ${verboseOption.usage}');
-// }
 
 // // const version = '0.0.1';
 // // void main(List<String> arguments) {

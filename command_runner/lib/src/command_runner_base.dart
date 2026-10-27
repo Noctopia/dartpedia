@@ -1,19 +1,47 @@
+import 'dart:async';
 import 'dart:collection';
 import 'dart:io';
 
-import 'arguments.dart';
+import 'package:command_runner/command_runner.dart';
+
+// import 'exceptions.dart';
 
 class CommandRunner {
+  // Add a constructor that accepts the optional callback.
+  CommandRunner({this.onOutput, this.onError});
+
+  /// If not null, this method is used to handle output. Useful if you want to
+  /// execute code before the output is printed to the console, or if you
+  /// want to do something other than print output the console.
+  /// If null, the onInput method will [print] the output.
+  FutureOr<void> Function(String)? onOutput;
+
+  FutureOr<void> Function(Object)? onError;
+
   final Map<String, Command> _commands = <String, Command>{};
 
   UnmodifiableSetView<Command> get commands =>
       UnmodifiableSetView<Command>(<Command>{..._commands.values});
 
   Future<void> run(List<String> input) async {
-    final ArgResults results = parse(input);
-    if (results.command != null) {
-      Object? output = await _commands[results.command!]?.run(results);
-      print(output.toString());
+    try {
+      final ArgResults results = parse(input);
+      if (results.command != null) {
+        final Object? output = await _commands[results.command!]?.run(results);
+        if (output != null) {
+          if (onOutput != null) {
+            await onOutput!(output.toString());
+          } else {
+            print(output);
+          }
+        }
+      }
+    } on Exception catch (exception) {
+      if (onError != null) {
+        await onError!(exception);
+      } else {
+        rethrow;
+      }
     }
   }
 
@@ -22,10 +50,110 @@ class CommandRunner {
     command.runner = this;
   }
 
+  // ArgResults parse(List<String> input) {
+  //   var results = ArgResults();
+  //   results.command = _commands[input.first]?.name;
+  //   return results;
+  // }
+
+  // [Step 6 update] This method is replaced entirely.
   ArgResults parse(List<String> input) {
-    var results = ArgResults();
-    results.command = _commands[input.first]?.name;
+    ArgResults results = ArgResults();
+    if (input.isEmpty) return results;
+
+    // Throw an exception if the command is not recognized.
+    if (_commands.containsKey(input.first)) {
+      results.command = _commands[input.first]?.name;
+      input = input.sublist(1);
+    } else {
+      throw ArgumentException(
+        'The first word of input must be a command.',
+        null,
+        input.first,
+      );
+    }
+
+    // Throw an exception if multiple commands are provided.
+    if (results.command != null &&
+        input.isNotEmpty &&
+        _commands.containsKey(input.first)) {
+      throw ArgumentException(
+        'Input can only contain one command. Got ${input.first} and ${results.command!}',
+        null,
+        input.first,
+      );
+    }
+
+    // Section: Handle options, including flags.
+    Map<Option, Object?> inputOptions = {};
+    int i = 0;
+    while (i < input.length) {
+      if (input[i].startsWith('-')) {
+        var base = _removeDash(input[i]);
+        // Throw an exception if an option is not recognized for the given command.
+        var option = _commands[results.command!]!.options.firstWhere(
+          (option) => option.name == base || option.abbr == base,
+          orElse: () {
+            throw ArgumentException(
+              'Unknown option ${input[i]}',
+              results.command!,
+              input[i],
+            );
+          },
+        );
+
+        if (option.type == OptionType.flag) {
+          inputOptions[option] = true;
+          i++;
+          continue;
+        }
+
+        if (option.type == OptionType.option) {
+          // Throw an exception if an option requires an argument but none is given.
+          if (i + 1 >= input.length) {
+            throw ArgumentException(
+              'Option ${option.name} requires an argument',
+              results.command!,
+              option.name,
+            );
+          }
+          if (input[i + 1].startsWith('-')) {
+            throw ArgumentException(
+              'Option ${option.name} requires an argument, but got another option ${input[i + 1]}',
+              results.command!,
+              option.name,
+            );
+          }
+          var arg = input[i + 1];
+          inputOptions[option] = arg;
+          i++;
+        }
+      } else {
+        // Throw an exception if more than one positional argument is provided.
+        if (results.commandArg != null && results.commandArg!.isNotEmpty) {
+          throw ArgumentException(
+            'Commands can only have up to one argument.',
+            results.command!,
+            input[i],
+          );
+        }
+        results.commandArg = input[i];
+      }
+      i++;
+    }
+    results.options = inputOptions;
+
     return results;
+  }
+
+  String _removeDash(String input) {
+    if (input.startsWith('--')) {
+      return input.substring(2);
+    }
+    if (input.startsWith('-')) {
+      return input.substring(1);
+    }
+    return input;
   }
 
   String get usage {
